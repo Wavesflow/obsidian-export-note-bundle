@@ -27,33 +27,32 @@ Then:
 4. Restart Obsidian or reload community plugins.
 5. Enable `Export Note Bundle`.
 
-## Local layout
 
-The cleanest setup is to keep two separate folders:
+# Export Note Bundle (中文版)
 
-- `plugin-dev/export-note-bundle/`: source repository
-- `.obsidian/plugins/export-note-bundle/`: runtime plugin folder used by Obsidian
+Export Note Bundle 是一个 Obsidian 桌面插件，用来把笔记和它们引用的附件一起导出成一个可搬走的文件夹。
 
-To keep the GitHub homepage tidy, this repository keeps most development files inside folders:
+作者：Negative Boson（负性玻色子）
 
-- `src/`: TypeScript source
-- `scripts/`: helper scripts
-- `config/`: build and TypeScript config
-- `dist/`: generated build output, not committed
+## 功能
 
-The runtime folder only needs:
+- 导出当前笔记及其所有附件  
+- 递归导出整个文件夹  
+- 导出时保留原有的文件夹结构  
+- 支持导出自定义文件列表  
+- 支持按标签导出文件  
+- 支持 Markdown、Canvas、Excalidraw 和 `.base` 文件  
 
-- `main.js`
-- `manifest.json`
-- `versions.json`
-- `data.json` (local settings, optional)
+## 安装
 
-## Build and deploy
+最简单的方式是从 GitHub 下载最新版本：
 
-```bash
-npm install
-npm run build
-npm run deploy
-```
+[最新版本](https://github.com/Wavesflow/obsidian-export-note-bundle/releases/latest)
 
-`npm run deploy` copies the runtime files into the Obsidian plugin folder. If the repository is not located under the same vault, run the PowerShell script manually and pass a target path.
+然后按下面步骤操作：
+
+1. 下载 release 里的 `export-note-bundle.zip`  
+2. 解压压缩包  
+3. 把 `export-note-bundle` 文件夹拖到你的 vault 的 `.obsidian/plugins/` 目录下  
+4. 重启 Obsidian，或者在社区插件里点击 reload  
+5. 在插件列表里启用 `Export Note Bundle`  
