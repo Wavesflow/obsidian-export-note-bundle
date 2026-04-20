@@ -34,6 +34,11 @@ interface AssetCopyPlan {
   linkPath: string;
 }
 
+interface RewrittenLink {
+  fileName: string;
+  relativePath: string;
+}
+
 async function readContent(app: App, file: TFile): Promise<SourceContent> {
   const text = await app.vault.cachedRead(file);
   return {
@@ -66,7 +71,7 @@ function buildCopyPlan(
 
   let renamed = 0;
   const plan: AssetCopyPlan[] = [];
-  const linkMap = new Map<string, string>();
+  const linkMap = new Map<string, RewrittenLink>();
 
   for (const target of targets.values()) {
     const name = allocUniqueAssetName(taken, target.name);
@@ -75,7 +80,10 @@ function buildCopyPlan(
     }
     const linkPath = linkPathForName(name);
     plan.push({ file: target, name, linkPath });
-    linkMap.set(target.path, linkPath);
+    linkMap.set(target.path, {
+      fileName: name,
+      relativePath: linkPath,
+    });
   }
 
   return { missing, renamed, plan, linkMap };
@@ -91,7 +99,11 @@ function replaceLinkpath(raw: string, oldPath: string, newPath: string): string 
   return raw.replace(oldPath, newPath);
 }
 
-function rewriteMarkdownContent(content: string, refs: Ref[], linkMap: Map<string, string>): string {
+function rewriteMarkdownContent(
+  content: string,
+  refs: Ref[],
+  linkMap: Map<string, RewrittenLink>,
+): string {
   const rangedRefs = refs
     .filter(
       (ref): ref is Ref & { start: number; end: number; target: TFile } =>
@@ -112,7 +124,10 @@ function rewriteMarkdownContent(content: string, refs: Ref[], linkMap: Map<strin
     if (ref.start < cursor) continue;
 
     out += content.slice(cursor, ref.start);
-    out += replaceLinkpath(ref.raw, ref.linkpath, linkMap.get(ref.target.path)!);
+    const replacement = ref.raw.includes("[[")
+      ? linkMap.get(ref.target.path)!.fileName
+      : linkMap.get(ref.target.path)!.relativePath;
+    out += replaceLinkpath(ref.raw, ref.linkpath, replacement);
     cursor = ref.end;
   }
   out += content.slice(cursor);
@@ -131,14 +146,14 @@ function rewriteWikilinks(
   app: App,
   file: TFile,
   content: string,
-  linkMap: Map<string, string>,
+  linkMap: Map<string, RewrittenLink>,
 ): string {
   const wikilinkRe = /(!?)\[\[([^\[\]\r\n|]+?)(\|[^\[\]\r\n]*)?\]\]/g;
   return content.replace(wikilinkRe, (raw, bang, linkTarget, alias = "") => {
     const target = resolveTargetFromLinkpath(app, file.path, String(linkTarget).trim());
     if (!target) return raw;
 
-    const rewritten = linkMap.get(target.path);
+    const rewritten = linkMap.get(target.path)?.fileName;
     if (!rewritten) return raw;
 
     return `${bang}[[${rewritten}${alias ?? ""}]]`;
@@ -149,7 +164,7 @@ function rewriteCanvasContent(
   app: App,
   file: TFile,
   content: string,
-  linkMap: Map<string, string>,
+  linkMap: Map<string, RewrittenLink>,
 ): string {
   let data: unknown;
   try {
@@ -171,7 +186,7 @@ function rewriteCanvasContent(
     if (node.type === "file" && typeof node.file === "string") {
       const target = resolveTargetFromLinkpath(app, file.path, node.file);
       if (target) {
-        const rewritten = linkMap.get(target.path);
+        const rewritten = linkMap.get(target.path)?.fileName;
         if (rewritten) {
           node.file = rewritten;
         }
@@ -191,7 +206,7 @@ function rewriteContent(
   file: TFile,
   content: string,
   refs: Ref[],
-  linkMap: Map<string, string>,
+  linkMap: Map<string, RewrittenLink>,
 ): string {
   switch (file.extension.toLowerCase()) {
     case "md":
@@ -386,7 +401,7 @@ export async function exportBatchShared(
 
       const missing: string[] = [];
       let renamedForFile = 0;
-      const linkMap = new Map<string, string>();
+      const linkMap = new Map<string, RewrittenLink>();
       const toCopy: AssetCopyPlan[] = [];
 
       for (const ref of refs) {
@@ -410,7 +425,10 @@ export async function exportBatchShared(
           });
         }
 
-        linkMap.set(ref.target.path, linkPathForName(assignedName));
+        linkMap.set(ref.target.path, {
+          fileName: assignedName,
+          relativePath: linkPathForName(assignedName),
+        });
       }
 
       const rewritten = rewriteContent(app, file, text, refs, linkMap);
