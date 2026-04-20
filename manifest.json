@@ -1,0 +1,10 @@
+{
+  "id": "export-note-bundle",
+  "name": "Export Note Bundle",
+  "version": "0.1.1",
+  "minAppVersion": "1.4.0",
+  "description": "Export notes, folders, canvases, and referenced assets into portable bundles while preserving nested folder structure.",
+  "author": "Negative Boson (负性玻色子)",
+  "authorUrl": "https://github.com/Wavesflow",
+  "isDesktopOnly": true
+}

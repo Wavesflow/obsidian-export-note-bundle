@@ -1,0 +1,36 @@
+{
+  "name": "export-note-bundle",
+  "version": "0.1.1",
+  "description": "Export Obsidian notes, folders, and their referenced assets into portable bundles.",
+  "main": "main.js",
+  "files": [
+    "main.js",
+    "manifest.json",
+    "versions.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "keywords": ["obsidian", "export", "assets", "canvas", "excalidraw"],
+  "author": "Negative Boson (负性玻色子)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Wavesflow/obsidian-export-note-bundle.git"
+  },
+  "homepage": "https://github.com/Wavesflow/obsidian-export-note-bundle#readme",
+  "bugs": {
+    "url": "https://github.com/Wavesflow/obsidian-export-note-bundle/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.19.12",
+    "obsidian": "latest",
+    "tslib": "^2.6.2",
+    "typescript": "^5.3.3"
+  }
+}
