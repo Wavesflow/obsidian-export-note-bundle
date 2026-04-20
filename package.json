@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production"
+    "build": "node esbuild.config.mjs production",
+    "deploy": "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1"
   },
   "keywords": ["obsidian", "export", "assets", "canvas", "excalidraw"],
   "author": "Negative Boson (负性玻色子)",

@@ -27,23 +27,26 @@ Then:
 4. Restart Obsidian or reload community plugins.
 5. Enable `Export Note Bundle`.
 
-## Files needed by Obsidian
+## Local layout
+
+The cleanest setup is to keep two separate folders:
+
+- `plugin-dev/export-note-bundle/`: source repository
+- `.obsidian/plugins/export-note-bundle/`: runtime plugin folder used by Obsidian
+
+The runtime folder only needs:
 
 - `main.js`
 - `manifest.json`
 - `versions.json`
+- `data.json` (local settings, optional)
 
-## Development files
-
-- `src/`
-- `package.json`
-- `package-lock.json`
-- `tsconfig.json`
-- `esbuild.config.mjs`
-
-## Build
+## Build and deploy
 
 ```bash
 npm install
 npm run build
+npm run deploy
 ```
+
+`npm run deploy` copies the runtime files into the Obsidian plugin folder. If the repository is not located under the same vault, run the PowerShell script manually and pass a target path.
