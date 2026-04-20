@@ -14,7 +14,7 @@ import {
   sanitizeSegment,
   writeFileAtomic,
 } from "./io";
-import { extractRefs } from "./resolve";
+import { Ref, extractRefs } from "./resolve";
 
 export interface ExportResult {
   outDir: string;
@@ -23,13 +23,203 @@ export interface ExportResult {
   renamed: number;
 }
 
-async function readContent(app: App, file: TFile) {
-  const bytes = await app.vault.readBinary(file);
-  const text =
-    file.extension.toLowerCase() === "md"
-      ? ""
-      : new TextDecoder("utf-8").decode(new Uint8Array(bytes));
-  return { bytes, text };
+interface SourceContent {
+  bytes: Uint8Array;
+  text: string;
+}
+
+interface AssetCopyPlan {
+  file: TFile;
+  name: string;
+  linkPath: string;
+}
+
+async function readContent(app: App, file: TFile): Promise<SourceContent> {
+  const text = await app.vault.cachedRead(file);
+  return {
+    bytes: new TextEncoder().encode(text),
+    text,
+  };
+}
+
+function toPosixPath(input: string): string {
+  return input.split(path.sep).join("/");
+}
+
+function buildCopyPlan(
+  refs: Ref[],
+  taken: Set<string>,
+  linkPathForName: (name: string) => string,
+) {
+  const targets = new Map<string, TFile>();
+  const missing: string[] = [];
+
+  for (const ref of refs) {
+    if (!ref.target) {
+      missing.push(ref.raw);
+      continue;
+    }
+    if (!targets.has(ref.target.path)) {
+      targets.set(ref.target.path, ref.target);
+    }
+  }
+
+  let renamed = 0;
+  const plan: AssetCopyPlan[] = [];
+  const linkMap = new Map<string, string>();
+
+  for (const target of targets.values()) {
+    const name = allocUniqueAssetName(taken, target.name);
+    if (name.toLowerCase() !== target.name.toLowerCase()) {
+      renamed++;
+    }
+    const linkPath = linkPathForName(name);
+    plan.push({ file: target, name, linkPath });
+    linkMap.set(target.path, linkPath);
+  }
+
+  return { missing, renamed, plan, linkMap };
+}
+
+function replaceLinkpath(raw: string, oldPath: string, newPath: string): string {
+  if (raw.includes(`[[${oldPath}`) || raw.includes(`![[${oldPath}`)) {
+    return raw.replace(oldPath, newPath);
+  }
+  if (raw.includes(`<${oldPath}>`)) {
+    return raw.replace(`<${oldPath}>`, `<${newPath}>`);
+  }
+  return raw.replace(oldPath, newPath);
+}
+
+function rewriteMarkdownContent(content: string, refs: Ref[], linkMap: Map<string, string>): string {
+  const rangedRefs = refs
+    .filter(
+      (ref): ref is Ref & { start: number; end: number; target: TFile } =>
+        ref.start !== undefined &&
+        ref.end !== undefined &&
+        ref.target !== undefined &&
+        linkMap.has(ref.target.path),
+    )
+    .sort((a, b) => a.start - b.start);
+
+  if (rangedRefs.length === 0) {
+    return content;
+  }
+
+  let out = "";
+  let cursor = 0;
+  for (const ref of rangedRefs) {
+    if (ref.start < cursor) continue;
+
+    out += content.slice(cursor, ref.start);
+    out += replaceLinkpath(ref.raw, ref.linkpath, linkMap.get(ref.target.path)!);
+    cursor = ref.end;
+  }
+  out += content.slice(cursor);
+  return out;
+}
+
+function resolveTargetFromLinkpath(app: App, sourcePath: string, linkpath: string): TFile | undefined {
+  const direct = app.vault.getAbstractFileByPath(linkpath);
+  if (direct instanceof TFile) {
+    return direct;
+  }
+  return app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath) ?? undefined;
+}
+
+function rewriteWikilinks(
+  app: App,
+  file: TFile,
+  content: string,
+  linkMap: Map<string, string>,
+): string {
+  const wikilinkRe = /(!?)\[\[([^\[\]\r\n|]+?)(\|[^\[\]\r\n]*)?\]\]/g;
+  return content.replace(wikilinkRe, (raw, bang, linkTarget, alias = "") => {
+    const target = resolveTargetFromLinkpath(app, file.path, String(linkTarget).trim());
+    if (!target) return raw;
+
+    const rewritten = linkMap.get(target.path);
+    if (!rewritten) return raw;
+
+    return `${bang}[[${rewritten}${alias ?? ""}]]`;
+  });
+}
+
+function rewriteCanvasContent(
+  app: App,
+  file: TFile,
+  content: string,
+  linkMap: Map<string, string>,
+): string {
+  let data: unknown;
+  try {
+    data = JSON.parse(content);
+  } catch {
+    return content;
+  }
+
+  if (!data || typeof data !== "object") {
+    return content;
+  }
+
+  const canvas = data as { nodes?: Array<Record<string, unknown>> };
+  if (!Array.isArray(canvas.nodes)) {
+    return content;
+  }
+
+  for (const node of canvas.nodes) {
+    if (node.type === "file" && typeof node.file === "string") {
+      const target = resolveTargetFromLinkpath(app, file.path, node.file);
+      if (target) {
+        const rewritten = linkMap.get(target.path);
+        if (rewritten) {
+          node.file = rewritten;
+        }
+      }
+    }
+
+    if (node.type === "text" && typeof node.text === "string") {
+      node.text = rewriteWikilinks(app, file, node.text, linkMap);
+    }
+  }
+
+  return JSON.stringify(canvas, null, 2);
+}
+
+function rewriteContent(
+  app: App,
+  file: TFile,
+  content: string,
+  refs: Ref[],
+  linkMap: Map<string, string>,
+): string {
+  switch (file.extension.toLowerCase()) {
+    case "md":
+      return rewriteMarkdownContent(content, refs, linkMap);
+    case "canvas":
+      return rewriteCanvasContent(app, file, content, linkMap);
+    case "excalidraw":
+    case "base":
+      return rewriteWikilinks(app, file, content, linkMap);
+    default:
+      return content;
+  }
+}
+
+async function copyAssets(
+  app: App,
+  plan: AssetCopyPlan[],
+  attachDir: string,
+  onProgress?: (msg: string) => void,
+) {
+  const total = plan.length;
+  let done = 0;
+
+  await runLimited(plan, 4, async (item) => {
+    const bytes = await app.vault.readBinary(item.file);
+    await writeFileAtomic(path.join(attachDir, item.name), Buffer.from(bytes));
+    onProgress?.(`${++done}/${total}`);
+  });
 }
 
 export async function exportFile(
@@ -45,47 +235,24 @@ export async function exportFile(
   }
 
   onProgress?.("Reading...");
-  const { bytes, text } = await readContent(app, file);
+  const { text } = await readContent(app, file);
 
   onProgress?.("Scanning...");
   const refs = await extractRefs(app, file, text);
 
   const outDir = await allocUniqueDir(destBase, file.basename);
   const attachDir = path.join(outDir, sanitizeSegment(attachDirName));
+  const attachDirRel = sanitizeSegment(attachDirName);
+  const { missing, renamed, plan, linkMap } = buildCopyPlan(
+    refs,
+    new Set<string>(),
+    (name) => toPosixPath(path.join(attachDirRel, name)),
+  );
 
-  await writeFileAtomic(path.join(outDir, file.name), Buffer.from(bytes));
+  const rewritten = rewriteContent(app, file, text, refs, linkMap);
+  await writeFileAtomic(path.join(outDir, file.name), Buffer.from(rewritten, "utf8"));
 
-  const targets = new Map<string, TFile>();
-  const missing: string[] = [];
-  for (const ref of refs) {
-    if (!ref.target) {
-      missing.push(ref.raw);
-      continue;
-    }
-    if (!targets.has(ref.target.path)) {
-      targets.set(ref.target.path, ref.target);
-    }
-  }
-
-  const taken = new Set<string>();
-  let renamed = 0;
-  const plan: { file: TFile; name: string }[] = [];
-
-  for (const target of targets.values()) {
-    const name = allocUniqueAssetName(taken, target.name);
-    if (name.toLowerCase() !== target.name.toLowerCase()) {
-      renamed++;
-    }
-    plan.push({ file: target, name });
-  }
-
-  const total = plan.length;
-  let done = 0;
-  await runLimited(plan, 4, async (item) => {
-    const bytes = await app.vault.readBinary(item.file);
-    await writeFileAtomic(path.join(attachDir, item.name), Buffer.from(bytes));
-    onProgress?.(`${++done}/${total}`);
-  });
+  await copyAssets(app, plan, attachDir, onProgress);
 
   return { outDir, assetCount: plan.length, missing, renamed };
 }
@@ -208,17 +375,19 @@ export async function exportBatchShared(
     onProgress?.(prefix);
 
     try {
-      const { bytes, text } = await readContent(app, file);
+      const { text } = await readContent(app, file);
       const refs = await extractRefs(app, file, text);
 
       const noteOutDir = path.join(rootOut, ...getRelativeParentSegments(file, hierarchyRoot));
       const noteTaken = getOrCreateTakenSet(noteTakenByDir, noteOutDir);
       const noteName = allocUniqueAssetName(noteTaken, file.name);
-      await writeFileAtomic(path.join(noteOutDir, noteName), Buffer.from(bytes));
+      const linkPathForName = (name: string) =>
+        toPosixPath(path.relative(noteOutDir, path.join(attachDir, name)));
 
       const missing: string[] = [];
-      const toCopy: { file: TFile; name: string }[] = [];
       let renamedForFile = 0;
+      const linkMap = new Map<string, string>();
+      const toCopy: AssetCopyPlan[] = [];
 
       for (const ref of refs) {
         if (!ref.target) {
@@ -226,21 +395,29 @@ export async function exportBatchShared(
           continue;
         }
 
-        if (attachMap.has(ref.target.path)) {
-          continue;
+        let assignedName = attachMap.get(ref.target.path);
+        if (!assignedName) {
+          assignedName = allocUniqueAssetName(attachTaken, ref.target.name);
+          if (assignedName.toLowerCase() !== ref.target.name.toLowerCase()) {
+            renamedForFile++;
+            totalRenamed++;
+          }
+          attachMap.set(ref.target.path, assignedName);
+          toCopy.push({
+            file: ref.target,
+            name: assignedName,
+            linkPath: linkPathForName(assignedName),
+          });
         }
 
-        const name = allocUniqueAssetName(attachTaken, ref.target.name);
-        if (name.toLowerCase() !== ref.target.name.toLowerCase()) {
-          renamedForFile++;
-          totalRenamed++;
-        }
-        attachMap.set(ref.target.path, name);
-        toCopy.push({ file: ref.target, name });
+        linkMap.set(ref.target.path, linkPathForName(assignedName));
       }
 
-      let done = 0;
+      const rewritten = rewriteContent(app, file, text, refs, linkMap);
+      await writeFileAtomic(path.join(noteOutDir, noteName), Buffer.from(rewritten, "utf8"));
+
       const total = toCopy.length;
+      let done = 0;
       await runLimited(toCopy, 4, async (item) => {
         const bytes = await app.vault.readBinary(item.file);
         await writeFileAtomic(path.join(attachDir, item.name), Buffer.from(bytes));
