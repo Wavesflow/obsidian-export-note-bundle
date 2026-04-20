@@ -1,68 +1,39 @@
 # Export Note Bundle
 
-Export Note Bundle is an Obsidian desktop plugin for exporting notes, folders, and their referenced assets into portable bundles.
+Export Note Bundle is an Obsidian desktop plugin for exporting notes and their referenced assets into portable bundles.
 
 Author: Negative Boson (负性玻色子)
 
-## Features
+## What it does
 
-- Export the current note with all referenced assets.
+- Export the current note with attachments.
 - Export a whole folder recursively.
-- Preserve nested folder structure when exporting folders.
-- Export a custom export list.
+- Keep nested folder structure during folder export.
+- Export a custom list of files.
 - Export supported files by tag.
 - Support Markdown, Canvas, Excalidraw, and `.base` files.
-- Choose between per-note attachments and a shared attachment folder.
 
-## Attachment layouts
+## Install
 
-- `per-note`: each exported note gets its own attachment folder.
-- `shared`: the whole batch shares one attachment folder.
+The easiest way is to download the latest release from GitHub:
 
-## Supported workflows
+[Latest release](https://github.com/Wavesflow/obsidian-export-note-bundle/releases/latest)
 
-- Command palette export for the active file.
-- File explorer context menu export for folders.
-- Batch export from the plugin's export list.
-- Batch export by tag.
+Then:
 
-## Settings
+1. Download `export-note-bundle.zip` from the release assets.
+2. Unzip it.
+3. Drag the `export-note-bundle` folder into your vault's `.obsidian/plugins/` folder.
+4. Restart Obsidian or reload community plugins.
+5. Enable `Export Note Bundle`.
 
-- `Export base directory`: absolute output directory for exports.
-- `Open folder after export`: reveal the result in the system file manager.
-- `Attachment layout`: choose `per-note` or `shared`.
-- `Attachment folder name`: customize the attachment directory name.
+## Files needed by Obsidian
 
-## Example output
-
-```text
-Project Notes_20260420-193000/
-  Chapter 1/
-    Note A/
-      Note A.md
-      Attachment/
-        image-1.png
-  Chapter 2/
-    Note B/
-      Note B.md
-      Attachment/
-        chart.pdf
-```
-
-## Development
-
-```bash
-npm install
-npm run build
-```
-
-Important runtime files:
-
-- `manifest.json`
 - `main.js`
+- `manifest.json`
 - `versions.json`
 
-Repository-only development files:
+## Development files
 
 - `src/`
 - `package.json`
@@ -70,8 +41,9 @@ Repository-only development files:
 - `tsconfig.json`
 - `esbuild.config.mjs`
 
-Local files such as `node_modules/` and `data.json` should not be committed.
+## Build
 
-## Release notes
-
-- `0.1.1`: preserve nested folder structure during folder export and clean up repository metadata.
+```bash
+npm install
+npm run build
+```
