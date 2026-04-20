@@ -20,9 +20,8 @@ if ([string]::IsNullOrWhiteSpace($Target)) {
 $targetPath = [System.IO.Path]::GetFullPath($Target)
 New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
 
-$files = @("main.js", "manifest.json", "versions.json")
-foreach ($file in $files) {
-  Copy-Item -LiteralPath (Join-Path $repoRoot $file) -Destination (Join-Path $targetPath $file) -Force
-}
+Copy-Item -LiteralPath (Join-Path $repoRoot "dist\main.js") -Destination (Join-Path $targetPath "main.js") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "manifest.json") -Destination (Join-Path $targetPath "manifest.json") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "versions.json") -Destination (Join-Path $targetPath "versions.json") -Force
 
 Write-Host "Deployed runtime files to $targetPath"

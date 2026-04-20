@@ -34,6 +34,13 @@ The cleanest setup is to keep two separate folders:
 - `plugin-dev/export-note-bundle/`: source repository
 - `.obsidian/plugins/export-note-bundle/`: runtime plugin folder used by Obsidian
 
+To keep the GitHub homepage tidy, this repository keeps most development files inside folders:
+
+- `src/`: TypeScript source
+- `scripts/`: helper scripts
+- `config/`: build and TypeScript config
+- `dist/`: generated build output, not committed
+
 The runtime folder only needs:
 
 - `main.js`

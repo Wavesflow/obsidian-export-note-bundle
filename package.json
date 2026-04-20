@@ -2,17 +2,10 @@
   "name": "export-note-bundle",
   "version": "0.1.1",
   "description": "Export Obsidian notes, folders, and their referenced assets into portable bundles.",
-  "main": "main.js",
-  "files": [
-    "main.js",
-    "manifest.json",
-    "versions.json",
-    "README.md",
-    "LICENSE"
-  ],
+  "main": "dist/main.js",
   "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production",
+    "dev": "node config/esbuild.config.mjs",
+    "build": "node config/esbuild.config.mjs production",
     "deploy": "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1"
   },
   "keywords": ["obsidian", "export", "assets", "canvas", "excalidraw"],

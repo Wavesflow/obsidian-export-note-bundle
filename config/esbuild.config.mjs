@@ -31,7 +31,7 @@ const context = await esbuild.context({
   treeShaking: true,
   minify: prod,
   legalComments: "none",
-  outfile: "main.js",
+  outfile: "dist/main.js",
   platform: "node",
 });
 
