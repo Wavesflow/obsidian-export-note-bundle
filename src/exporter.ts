@@ -36,7 +36,8 @@ interface AssetCopyPlan {
 
 interface RewrittenLink {
   fileName: string;
-  relativePath: string;
+  markdownPath: string;
+  canvasPath: string;
 }
 
 async function readContent(app: App, file: TFile): Promise<SourceContent> {
@@ -54,7 +55,7 @@ function toPosixPath(input: string): string {
 function buildCopyPlan(
   refs: Ref[],
   taken: Set<string>,
-  linkPathForName: (name: string) => string,
+  linkForName: (name: string) => RewrittenLink,
 ) {
   const targets = new Map<string, TFile>();
   const missing: string[] = [];
@@ -78,12 +79,9 @@ function buildCopyPlan(
     if (name.toLowerCase() !== target.name.toLowerCase()) {
       renamed++;
     }
-    const linkPath = linkPathForName(name);
-    plan.push({ file: target, name, linkPath });
-    linkMap.set(target.path, {
-      fileName: name,
-      relativePath: linkPath,
-    });
+    const link = linkForName(name);
+    plan.push({ file: target, name, linkPath: link.markdownPath });
+    linkMap.set(target.path, link);
   }
 
   return { missing, renamed, plan, linkMap };
@@ -97,6 +95,67 @@ function replaceLinkpath(raw: string, oldPath: string, newPath: string): string 
     return raw.replace(`<${oldPath}>`, `<${newPath}>`);
   }
   return raw.replace(oldPath, newPath);
+}
+
+function normalizeLinkKey(input: string): string {
+  return input.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
+}
+
+function rewriteLinkTargetPreservingSubpath(originalTarget: string, rewrittenBase: string): string {
+  const hashIndex = originalTarget.indexOf("#");
+  if (hashIndex === -1) {
+    return rewrittenBase;
+  }
+  return `${rewrittenBase}${originalTarget.slice(hashIndex)}`;
+}
+
+function rewriteCanvasByBundleAssets(
+  content: string,
+  canvasRootDir: string,
+  assetPaths: string[],
+): string {
+  let data: unknown;
+  try {
+    data = JSON.parse(content);
+  } catch {
+    return content;
+  }
+
+  if (!data || typeof data !== "object") {
+    return content;
+  }
+
+  const canvas = data as { nodes?: Array<Record<string, unknown>> };
+  if (!Array.isArray(canvas.nodes) || assetPaths.length === 0) {
+    return content;
+  }
+
+  const basenameMap = new Map<string, string[]>();
+  for (const assetPath of assetPaths) {
+    const relativePath = toPosixPath(path.relative(canvasRootDir, assetPath));
+    const basename = path.posix.basename(relativePath).toLowerCase();
+    const matches = basenameMap.get(basename);
+    if (matches) {
+      matches.push(relativePath);
+    } else {
+      basenameMap.set(basename, [relativePath]);
+    }
+  }
+
+  for (const node of canvas.nodes) {
+    if (node.type !== "file" || typeof node.file !== "string") {
+      continue;
+    }
+
+    const currentPath = normalizeLinkKey(node.file);
+    const basename = path.posix.basename(currentPath).toLowerCase();
+    const matches = basenameMap.get(basename);
+    if (matches?.length === 1 && normalizeLinkKey(matches[0]) !== currentPath) {
+      node.file = matches[0];
+    }
+  }
+
+  return JSON.stringify(canvas, null, 2);
 }
 
 function rewriteMarkdownContent(
@@ -124,9 +183,10 @@ function rewriteMarkdownContent(
     if (ref.start < cursor) continue;
 
     out += content.slice(cursor, ref.start);
-    const replacement = ref.raw.includes("[[")
+    const rewrittenBase = ref.raw.includes("[[")
       ? linkMap.get(ref.target.path)!.fileName
-      : linkMap.get(ref.target.path)!.relativePath;
+      : linkMap.get(ref.target.path)!.markdownPath;
+    const replacement = rewriteLinkTargetPreservingSubpath(ref.linkpath, rewrittenBase);
     out += replaceLinkpath(ref.raw, ref.linkpath, replacement);
     cursor = ref.end;
   }
@@ -150,12 +210,14 @@ function rewriteWikilinks(
 ): string {
   const wikilinkRe = /(!?)\[\[([^\[\]\r\n|]+?)(\|[^\[\]\r\n]*)?\]\]/g;
   return content.replace(wikilinkRe, (raw, bang, linkTarget, alias = "") => {
-    const target = resolveTargetFromLinkpath(app, file.path, String(linkTarget).trim());
+    const trimmedTarget = String(linkTarget).trim();
+    const target = resolveTargetFromLinkpath(app, file.path, trimmedTarget);
     if (!target) return raw;
 
-    const rewritten = linkMap.get(target.path)?.fileName;
-    if (!rewritten) return raw;
+    const rewrittenBase = linkMap.get(target.path)?.fileName;
+    if (!rewrittenBase) return raw;
 
+    const rewritten = rewriteLinkTargetPreservingSubpath(trimmedTarget, rewrittenBase);
     return `${bang}[[${rewritten}${alias ?? ""}]]`;
   });
 }
@@ -164,6 +226,7 @@ function rewriteCanvasContent(
   app: App,
   file: TFile,
   content: string,
+  refs: Ref[],
   linkMap: Map<string, RewrittenLink>,
 ): string {
   let data: unknown;
@@ -182,14 +245,32 @@ function rewriteCanvasContent(
     return content;
   }
 
+  const canvasFileMap = new Map<string, string>();
+  for (const ref of refs) {
+    if (!ref.target || ref.raw !== ref.linkpath) {
+      continue;
+    }
+
+    const rewritten = linkMap.get(ref.target.path)?.canvasPath;
+    if (!rewritten) {
+      continue;
+    }
+
+    canvasFileMap.set(normalizeLinkKey(ref.raw), rewritten);
+  }
+
   for (const node of canvas.nodes) {
     if (node.type === "file" && typeof node.file === "string") {
+      const directRewrite = canvasFileMap.get(normalizeLinkKey(node.file));
+      if (directRewrite) {
+        node.file = directRewrite;
+        continue;
+      }
+
       const target = resolveTargetFromLinkpath(app, file.path, node.file);
-      if (target) {
-        const rewritten = linkMap.get(target.path)?.fileName;
-        if (rewritten) {
-          node.file = rewritten;
-        }
+      const fallbackRewrite = target ? linkMap.get(target.path)?.canvasPath : undefined;
+      if (fallbackRewrite) {
+        node.file = fallbackRewrite;
       }
     }
 
@@ -212,7 +293,7 @@ function rewriteContent(
     case "md":
       return rewriteMarkdownContent(content, refs, linkMap);
     case "canvas":
-      return rewriteCanvasContent(app, file, content, linkMap);
+      return rewriteCanvasContent(app, file, content, refs, linkMap);
     case "excalidraw":
     case "base":
       return rewriteWikilinks(app, file, content, linkMap);
@@ -243,6 +324,7 @@ export async function exportFile(
   destBase: string,
   attachDirName: string,
   onProgress?: (msg: string) => void,
+  canvasRootDir?: string,
 ): Promise<ExportResult> {
   const ext = file.extension.toLowerCase();
   if (!CONTENT_ROOT_EXTENSIONS.has(ext)) {
@@ -258,14 +340,26 @@ export async function exportFile(
   const outDir = await allocUniqueDir(destBase, file.basename);
   const attachDir = path.join(outDir, sanitizeSegment(attachDirName));
   const attachDirRel = sanitizeSegment(attachDirName);
+  const canvasRoot = canvasRootDir ?? destBase;
   const { missing, renamed, plan, linkMap } = buildCopyPlan(
     refs,
     new Set<string>(),
-    (name) => toPosixPath(path.join(attachDirRel, name)),
+    (name) => ({
+      fileName: name,
+      markdownPath: toPosixPath(path.join(attachDirRel, name)),
+      canvasPath: toPosixPath(path.relative(canvasRoot, path.join(attachDir, name))),
+    }),
   );
 
   const rewritten = rewriteContent(app, file, text, refs, linkMap);
-  await writeFileAtomic(path.join(outDir, file.name), Buffer.from(rewritten, "utf8"));
+  const finalized = ext === "canvas"
+    ? rewriteCanvasByBundleAssets(
+        rewritten,
+        canvasRoot,
+        plan.map((item) => path.join(attachDir, item.name)),
+      )
+    : rewritten;
+  await writeFileAtomic(path.join(outDir, file.name), Buffer.from(finalized, "utf8"));
 
   await copyAssets(app, plan, attachDir, onProgress);
 
@@ -337,8 +431,13 @@ export async function exportBatchPerNote(
 
     try {
       const fileDestBase = path.join(rootOut, ...getRelativeParentSegments(file, hierarchyRoot));
-      const result = await exportFile(app, file, fileDestBase, attachDirName, (message) =>
-        onProgress?.(`${prefix} - ${message}`),
+      const result = await exportFile(
+        app,
+        file,
+        fileDestBase,
+        attachDirName,
+        (message) => onProgress?.(`${prefix} - ${message}`),
+        destBase,
       );
       totalAssets += result.assetCount;
       totalMissing += result.missing.length;
@@ -396,8 +495,10 @@ export async function exportBatchShared(
       const noteOutDir = path.join(rootOut, ...getRelativeParentSegments(file, hierarchyRoot));
       const noteTaken = getOrCreateTakenSet(noteTakenByDir, noteOutDir);
       const noteName = allocUniqueAssetName(noteTaken, file.name);
-      const linkPathForName = (name: string) =>
+      const markdownPathForName = (name: string) =>
         toPosixPath(path.relative(noteOutDir, path.join(attachDir, name)));
+      const canvasPathForName = (name: string) =>
+        toPosixPath(path.relative(destBase, path.join(attachDir, name)));
 
       const missing: string[] = [];
       let renamedForFile = 0;
@@ -421,18 +522,26 @@ export async function exportBatchShared(
           toCopy.push({
             file: ref.target,
             name: assignedName,
-            linkPath: linkPathForName(assignedName),
+            linkPath: markdownPathForName(assignedName),
           });
         }
 
         linkMap.set(ref.target.path, {
           fileName: assignedName,
-          relativePath: linkPathForName(assignedName),
+          markdownPath: markdownPathForName(assignedName),
+          canvasPath: canvasPathForName(assignedName),
         });
       }
 
       const rewritten = rewriteContent(app, file, text, refs, linkMap);
-      await writeFileAtomic(path.join(noteOutDir, noteName), Buffer.from(rewritten, "utf8"));
+      const finalized = file.extension.toLowerCase() === "canvas"
+        ? rewriteCanvasByBundleAssets(
+            rewritten,
+            destBase,
+            Array.from(new Set(Array.from(attachMap.values()).map((name) => path.join(attachDir, name)))),
+          )
+        : rewritten;
+      await writeFileAtomic(path.join(noteOutDir, noteName), Buffer.from(finalized, "utf8"));
 
       const total = toCopy.length;
       let done = 0;

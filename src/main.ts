@@ -31,7 +31,7 @@ interface ExportSettings {
 
 const DEFAULTS: ExportSettings = {
   exportBaseDir: "",
-  openFolderAfterExport: true,
+  openFolderAfterExport: false,
   attachmentMode: "per-note",
   attachmentDirName: "Attachment",
 };
@@ -286,7 +286,6 @@ export default class ExportNoteBundlePlugin extends Plugin {
       }
       new Notice(lines.join("\n"), 8000);
 
-      if (this.settings.openFolderAfterExport) openInOs(result.outDir);
     } catch (error) {
       notice.hide();
       console.error("[export-note-bundle] single export failed", error);
@@ -304,7 +303,7 @@ export default class ExportNoteBundlePlugin extends Plugin {
     const dest = await this.resolveDestBase();
     if (!dest) return;
 
-    await this.runBatch(files, dest, `${folder.name || "Vault"}_${stamp()}`, 0, folder);
+    await this.runBatch(files, dest, folder.name || "Vault", 0, folder);
   }
 
   async runList() {
@@ -334,7 +333,7 @@ export default class ExportNoteBundlePlugin extends Plugin {
     const result = await this.runBatch(
       resolved,
       dest,
-      `ExportList_${stamp()}`,
+      "ExportList",
       missingPaths.length,
     );
     if (result && result.failed === 0 && missingPaths.length === 0) {
@@ -356,7 +355,7 @@ export default class ExportNoteBundlePlugin extends Plugin {
     if (!dest) return;
 
     const safeTag = tag.replace(/^#/, "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
-    await this.runBatch(files, dest, `Tag_${safeTag}_${stamp()}`);
+    await this.runBatch(files, dest, `Tag_${safeTag}`);
   }
 
   private async runBatch(
@@ -415,7 +414,6 @@ export default class ExportNoteBundlePlugin extends Plugin {
         console.warn("[export-note-bundle] batch unresolved:", unresolvedItems);
       }
 
-      if (this.settings.openFolderAfterExport) openInOs(result.rootOut);
       return result;
     } catch (error) {
       notice.hide();
@@ -447,15 +445,6 @@ export default class ExportNoteBundlePlugin extends Plugin {
 
 function isSupported(file: TFile): boolean {
   return CONTENT_ROOT_EXTENSIONS.has(file.extension.toLowerCase());
-}
-
-function stamp(): string {
-  const now = new Date();
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return (
-    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
-    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  );
 }
 
 async function pickDirectoryViaDialog(): Promise<string | null> {
