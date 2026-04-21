@@ -24,14 +24,12 @@ type AttachmentMode = "per-note" | "shared";
 
 interface ExportSettings {
   exportBaseDir: string;
-  openFolderAfterExport: boolean;
   attachmentMode: AttachmentMode;
   attachmentDirName: string;
 }
 
 const DEFAULTS: ExportSettings = {
   exportBaseDir: "",
-  openFolderAfterExport: false,
   attachmentMode: "per-note",
   attachmentDirName: "Attachment",
 };
@@ -87,8 +85,6 @@ const I18N = {
     settingBaseDir: "Export base directory",
     settingBaseDirDesc:
       "Absolute path where exports are written. Leave blank to pick each time.",
-    settingOpen: "Open folder after export",
-    settingOpenDesc: "Reveal the exported folder in the OS file manager.",
     settingMode: "Attachment layout",
     settingModeDesc:
       "Per-note keeps each note in its own bundle. Shared keeps one attachment folder for the whole batch.",
@@ -135,8 +131,6 @@ const I18N = {
     settingTitle: "Export Note Bundle",
     settingBaseDir: "导出根目录",
     settingBaseDirDesc: "所有导出内容都会写到这里。留空则每次弹窗选择。",
-    settingOpen: "导出后打开文件夹",
-    settingOpenDesc: "导出完成后在系统文件管理器中定位输出目录。",
     settingMode: "附件布局",
     settingModeDesc:
       "每笔记模式会为每个文件创建独立导出包；共享模式会把整个批次的附件集中到一个文件夹。",
@@ -435,7 +429,11 @@ export default class ExportNoteBundlePlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    const stored = ((await this.loadData()) ?? {}) as Partial<ExportSettings> & {
+      openFolderAfterExport?: boolean;
+    };
+    const { openFolderAfterExport: _legacy, ...rest } = stored;
+    this.settings = Object.assign({}, DEFAULTS, rest);
   }
 
   async saveSettings() {
@@ -489,22 +487,6 @@ async function pickDirectoryViaDialog(): Promise<string | null> {
   return null;
 }
 
-function openInOs(dir: string) {
-  try {
-    const req = (window as unknown as { require?: (module: string) => unknown }).require;
-    if (!req) return;
-
-    const electron = req("electron") as {
-      shell?: { openPath?: (target: string) => Promise<string> | string };
-      remote?: { shell?: { openPath?: (target: string) => Promise<string> | string } };
-    };
-    const shell = electron.shell ?? electron.remote?.shell;
-    shell?.openPath?.(dir);
-  } catch {
-    // Non-fatal.
-  }
-}
-
 class TagSuggestModal extends FuzzySuggestModal<string> {
   constructor(app: App, private onPick: (tag: string) => void) {
     super(app);
@@ -542,18 +524,6 @@ class ExportSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.exportBaseDir)
           .onChange(async (value) => {
             this.plugin.settings.exportBaseDir = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(T.settingOpen)
-      .setDesc(T.settingOpenDesc)
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.openFolderAfterExport)
-          .onChange(async (value) => {
-            this.plugin.settings.openFolderAfterExport = value;
             await this.plugin.saveSettings();
           }),
       );

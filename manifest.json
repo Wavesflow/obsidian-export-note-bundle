@@ -1,7 +1,7 @@
 {
   "id": "export-note-bundle",
   "name": "Export Note Bundle",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "1.4.0",
   "description": "Export notes, folders, canvases, and referenced assets into portable bundles while preserving nested folder structure.",
   "author": "Negative Boson (负性玻色子)",

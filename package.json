@@ -1,6 +1,6 @@
 {
   "name": "export-note-bundle",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Export Obsidian notes, folders, and their referenced assets into portable bundles.",
   "main": "dist/main.js",
   "scripts": {
